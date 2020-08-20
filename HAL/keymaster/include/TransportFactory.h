@@ -18,18 +18,20 @@
 #define __SE_TRANSPORT_FACTORY__
 
 #include "Transport.h"
+#include "SeServiceTransport.h"
 
 namespace se_transport {
 
 /**
  * TransportFactory class decides which transport mechanism to be used to send data to secure element. In case of
- * emulator the communication channel is socket and in case of device the communication channel is via OMAPI.
+ * emulator the communication channel is socket and in case of device the communication channel is secure_element
+ * service.
  */
 class TransportFactory {
     public:
     TransportFactory(bool isEmulator) {
         if (!isEmulator)
-            mTransport = std::unique_ptr<OmapiTransport>(new OmapiTransport());
+            mTransport = std::unique_ptr<SeServiceTransport>(new SeServiceTransport());
         else
             mTransport = std::unique_ptr<SocketTransport>(new SocketTransport());
     }

@@ -47,6 +47,9 @@ cc_binary {
         "android.hardware.keymaster@4.0",
         "libjc_transport",
         "libcrypto",
+        "android.hardware.secure_element@1.0",
+        "android.hardware.secure_element@1.1",
+        "android.hardware.secure_element@1.2",
     ],
 }
 
@@ -91,14 +94,19 @@ cc_library {
 
     srcs: [
         "4.1/SocketTransport.cpp",
-        "4.1/OmapiTransport.cpp"
+        "4.1/SeServiceTransport.cpp"
     ],
     export_include_dirs: [
         "include"
     ],
     shared_libs: [
+        "libutils",
+        "libhidlbase",
         "libbinder",
         "libbase",
         "liblog",
+        "android.hardware.secure_element@1.0",
+        "android.hardware.secure_element@1.1",
+        "android.hardware.secure_element@1.2",
     ],
 }

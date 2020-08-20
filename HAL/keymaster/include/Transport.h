@@ -47,35 +47,6 @@ class ITransport {
 
 };
 
-/**
- * OmapiTransport is derived from ITransport. This class gets the OMAPI service binder instance and uses IPC to
- * communicate with OMAPI service. OMAPI inturn communicates with hardware via ISecureElement.
- */
-class OmapiTransport : public ITransport {
-
-public:
-
-    /**
-     * Gets the binder instance of ISEService, gets the reader corresponding to secure element, establishes a session
-     * and opens a basic channel.
-     */
-	bool openConnection() override;
-    /**
-     * Transmists the data over the opened basic channel and receives the data back.
-     */
-    bool sendData(const uint8_t* inData, const size_t inLen, std::vector<uint8_t>& output) override;
-    /**
-     * Closes the connection.
-     */
-    bool closeConnection() override;
-    /**
-     * Returns the state of the connection status. Returns true if the connection is active, false if connection is
-     * broken.
-     */
-    bool isConnected() override;
-
-};
-
 class SocketTransport : public ITransport {
 
 public:
