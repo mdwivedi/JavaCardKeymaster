@@ -30,6 +30,6 @@ int main() {
         return -1;
     }
 
-    android::hardware::joinRpcThreadpool();
+    android::hardware::joinRpcThreadpool(); 
     return -1;  // Should never get here.
 }

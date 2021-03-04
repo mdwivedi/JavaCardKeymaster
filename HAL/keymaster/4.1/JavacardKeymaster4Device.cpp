@@ -28,6 +28,8 @@
 #include <keymaster/km_openssl/openssl_err.h>
 #include <keymaster/km_openssl/openssl_utils.h>
 #include <openssl/aes.h>
+#include <android/log.h>
+
 
 #include <JavacardKeymaster4Device.h>
 #include <JavacardSoftKeymasterContext.h>
@@ -51,11 +53,11 @@
 #define INS_END_KM_CMD 0x7F
 #define SW_KM_OPR 0UL
 #define SB_KM_OPR 1UL
+#define JAVACARD_KEYMASTER_VERSION 3
 
 namespace keymaster {
 namespace V4_1 {
 namespace javacard {
-
 static std::unique_ptr<se_transport::TransportFactory> pTransportFactory = nullptr;
 constexpr size_t kOperationTableSize = 4;
 /* Key is the newly generated operation handle. Value is a pair with first element having
@@ -125,7 +127,7 @@ enum ExtendedErrors {
 static inline std::unique_ptr<se_transport::TransportFactory>& getTransportFactoryInstance() {
     if(pTransportFactory == nullptr) {
         pTransportFactory = std::unique_ptr<se_transport::TransportFactory>(new se_transport::TransportFactory(
-                    android::base::GetBoolProperty("ro.kernel.qemu", false)));
+                    true));
         pTransportFactory->openConnection();
     }
     return pTransportFactory;
@@ -528,6 +530,9 @@ Return<void> JavacardKeymaster4Device::getHmacSharingParameters(getHmacSharingPa
 }
 
 Return<void> JavacardKeymaster4Device::computeSharedHmac(const hidl_vec<HmacSharingParameters>& params, computeSharedHmac_cb _hidl_cb) {
+    __android_log_print(ANDROID_LOG_DEBUG, "mvc", "xyz:%zu", params.size());
+    LOG(WARNING) << "Venkat JavacardKeymaster4Device::computeSharedHmac seed size: "; 
+
     cppbor::Array array;
     std::unique_ptr<Item> item;
     std::vector<uint8_t> cborOutData;
@@ -539,14 +544,22 @@ Return<void> JavacardKeymaster4Device::computeSharedHmac(const hidl_vec<HmacShar
     for(size_t i = 0; i < params.size(); ++i) {
         cppbor::Array innerArray;
         innerArray.add(static_cast<std::vector<uint8_t>>(params[i].seed));
+        //std::vector<uint8_t> test_seed(32, 1);
+        //innerArray.add(test_seed);
+
         for(size_t j = 0; j < params[i].nonce.size(); j++) {
             tempVec.push_back(params[i].nonce[j]);
         }
+        LOG(INFO) << "Venkat JavacardKeymaster4Device::computeSharedHmac seed size: " << params[i].seed.size(); 
+        LOG(INFO) << "Venkat JavacardKeymaster4Device::computeSharedHmac nonce size: " << params[i].nonce.size(); 
         innerArray.add(tempVec);
         tempVec.clear();
         outerArray.add(std::move(innerArray));
     }
+    LOG(INFO) << "Venkat JavacardKeymaster4Device::computeSharedHmac outerArraySize: " << outerArray.size(); 
+
     array.add(std::move(outerArray));
+    LOG(INFO) << "Venkat JavacardKeymaster4Device::computeSharedHmac paramSize: " << params.size(); 
     std::vector<uint8_t> cborData = array.encode();
 
     errorCode = sendData(Instruction::INS_COMPUTE_SHARED_HMAC_CMD, cborData, cborOutData);
@@ -563,13 +576,10 @@ Return<void> JavacardKeymaster4Device::computeSharedHmac(const hidl_vec<HmacShar
             }
         }
     }
-#ifdef VTS_EMULATOR
-    /* TODO temporary fix: vold daemon calls performHmacKeyAgreement. At that time when vold calls this API there is no
-     * network connectivity and socket cannot be connected. So as a hack we are calling softkeymaster to
-     * computeSharedHmac.
-     */
-    else {
-        ComputeSharedHmacRequest request;
+ #ifdef VTS_EMULATOR
+
+    else { 
+        ComputeSharedHmacRequest request(JAVACARD_KEYMASTER_VERSION);
         request.params_array.params_array = new keymaster::HmacSharingParameters[params.size()];
         request.params_array.num_params = params.size();
         for (size_t i = 0; i < params.size(); ++i) {
@@ -804,11 +814,11 @@ Return<void> JavacardKeymaster4Device::exportKey(KeyFormat exportFormat, const h
         return Void();
     }
 
-    ExportKeyRequest request;
+    ExportKeyRequest request(JAVACARD_KEYMASTER_VERSION);
     request.key_format = legacy_enum_conversion(exportFormat);
     request.SetKeyMaterial(keyBlob.data(), keyBlob.size());
 
-    ExportKeyResponse response;
+    ExportKeyResponse response(JAVACARD_KEYMASTER_VERSION);
     softKm_->ExportKey(request, &response);
 
     if(response.error == KM_ERROR_INCOMPATIBLE_ALGORITHM) {
@@ -967,12 +977,12 @@ Return<void> JavacardKeymaster4Device::begin(KeyPurpose purpose, const hidl_vec<
      * are handled by softkeymaster.
      */
     if (KeyPurpose::ENCRYPT == purpose || KeyPurpose::VERIFY == purpose) {
-        BeginOperationRequest request;
+        BeginOperationRequest request(JAVACARD_KEYMASTER_VERSION);
         request.purpose = legacy_enum_conversion(purpose);
         request.SetKeyMaterial(keyBlob.data(), keyBlob.size());
         request.additional_params.Reinitialize(KmParamSet(inParams));
 
-        BeginOperationResponse response;
+        BeginOperationResponse response(JAVACARD_KEYMASTER_VERSION);
         /* For Symmetric key operation, the BeginOperation returns KM_ERROR_INCOMPATIBLE_ALGORITHM error. */
         softKm_->BeginOperation(request, &response);
 
@@ -1062,7 +1072,7 @@ Return<void> JavacardKeymaster4Device::update(uint64_t halGeneratedOprHandle, co
     hidl_vec<KeyParameter> outParams;
     hidl_vec<uint8_t> output;
     uint64_t operationHandle;
-    UpdateOperationResponse response;
+    UpdateOperationResponse response(JAVACARD_KEYMASTER_VERSION);
     if (ErrorCode::OK != (errorCode = getOrigOperationHandle(halGeneratedOprHandle, operationHandle))) {
         _hidl_cb(errorCode, inputConsumed, outParams, output);
         return Void();
@@ -1070,7 +1080,7 @@ Return<void> JavacardKeymaster4Device::update(uint64_t halGeneratedOprHandle, co
 
     if (!isStrongboxOperation(halGeneratedOprHandle)) {
         /* SW keymaster (Public key operation) */
-        UpdateOperationRequest request;
+        UpdateOperationRequest request(JAVACARD_KEYMASTER_VERSION);
         request.op_handle = operationHandle;
         request.input.Reinitialize(input.data(), input.size());
         request.additional_params.Reinitialize(KmParamSet(inParams));
@@ -1162,7 +1172,7 @@ Return<void> JavacardKeymaster4Device::finish(uint64_t halGeneratedOprHandle, co
     uint64_t operationHandle;
     hidl_vec<KeyParameter> outParams;
     hidl_vec<uint8_t> output;
-    FinishOperationResponse response;
+    FinishOperationResponse response(JAVACARD_KEYMASTER_VERSION);
 
     if (ErrorCode::OK != (errorCode = getOrigOperationHandle(halGeneratedOprHandle, operationHandle))) {
         _hidl_cb(errorCode, outParams, output);
@@ -1171,7 +1181,7 @@ Return<void> JavacardKeymaster4Device::finish(uint64_t halGeneratedOprHandle, co
 
     if (!isStrongboxOperation(halGeneratedOprHandle)) {
         /* SW keymaster (Public key operation) */
-        FinishOperationRequest request;
+        FinishOperationRequest request(JAVACARD_KEYMASTER_VERSION);
         request.op_handle = operationHandle;
         request.input.Reinitialize(input.data(), input.size());
         request.signature.Reinitialize(signature.data(), signature.size());
@@ -1286,10 +1296,10 @@ Return<ErrorCode> JavacardKeymaster4Device::abort(uint64_t halGeneratedOprHandle
     if (ErrorCode::OK != (errorCode = getOrigOperationHandle(halGeneratedOprHandle, operationHandle))) {
         return errorCode;
     }
-    AbortOperationRequest request;
+    AbortOperationRequest request(JAVACARD_KEYMASTER_VERSION);
     request.op_handle = operationHandle;
 
-    AbortOperationResponse response;
+    AbortOperationResponse response(JAVACARD_KEYMASTER_VERSION);
     softKm_->AbortOperation(request, &response);
 
     errorCode = legacy_enum_conversion(response.error);
