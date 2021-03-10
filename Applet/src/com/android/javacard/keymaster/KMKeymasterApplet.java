@@ -1388,7 +1388,7 @@ public class KMKeymasterApplet extends Applet implements AppletEvent, ExtendedLe
         KMKeyParameters.findTag(
             KMType.BOOL_TAG, KMType.DEVICE_UNIQUE_ATTESTATION, data[KEY_PARAMETERS]);
     if (tmpVariables[0] != KMType.INVALID_VALUE) {
-      KMException.throwIt(KMError.UNIMPLEMENTED);
+      KMException.throwIt(KMError.CANNOT_ATTEST_IDS);
     }
     // The key which is being attested should be asymmetric i.e. RSA or EC
     tmpVariables[0] = KMEnumTag.getValue(KMType.ALGORITHM, data[HW_PARAMETERS]);
@@ -1782,26 +1782,23 @@ public class KMKeymasterApplet extends Applet implements AppletEvent, ExtendedLe
     Util.arrayFillNonAtomic(scratchPad, (short) 0, (short) 256, (byte) 0);
     switch (op.getAlgorithm()) {
       case KMType.RSA:
-        // Output for signature is always 256 bytes.
-        data[OUTPUT_DATA] = KMByteBlob.instance((short) 256);
         // If there is no padding we can treat signing as a RSA decryption operation.
-        if (op.getDigest() == KMType.DIGEST_NONE && op.getPadding() == KMType.PADDING_NONE) {
-          // Input data of Verify operation must be 256 bytes
-          if (op.getPurpose() == KMType.VERIFY
-              && KMByteBlob.cast(data[INPUT_DATA]).length() != 256) {
-            KMException.throwIt(KMError.INVALID_INPUT_LENGTH);
-          }
-        }
         try {
           if (op.getPurpose() == KMType.SIGN) {
             // len of signature will be 256 bytes
-            op.getOperation()
-                .sign(
+            short len = op.getOperation().sign(
                     KMByteBlob.cast(data[INPUT_DATA]).getBuffer(),
                     KMByteBlob.cast(data[INPUT_DATA]).getStartOff(),
-                    KMByteBlob.cast(data[INPUT_DATA]).length(),
+                    KMByteBlob.cast(data[INPUT_DATA]).length(), scratchPad,
+                    (short) 0);
+            // Maximum output size of signature is 256 bytes.
+            data[OUTPUT_DATA] = KMByteBlob.instance((short) 256);
+            Util.arrayCopyNonAtomic(
+                    scratchPad,
+                    (short) 0,
                     KMByteBlob.cast(data[OUTPUT_DATA]).getBuffer(),
-                    KMByteBlob.cast(data[OUTPUT_DATA]).getStartOff());
+                    (short) (KMByteBlob.cast(data[OUTPUT_DATA]).getStartOff() + 256 - len),
+                    len);
           } else {
             KMException.throwIt(KMError.UNSUPPORTED_PURPOSE);
           }
@@ -3145,6 +3142,10 @@ public class KMKeymasterApplet extends Applet implements AppletEvent, ExtendedLe
   }
 
   // This command is executed to set the boot parameters.
+  // releaseAllOperations has to be called on every boot, so
+  // it is called from inside setBootParams. Later in future if
+  // setBootParams is removed, then make sure that releaseAllOperations
+  // is moved to a place where it is called on every boot.
   private void processSetBootParamsCmd(APDU apdu) {
     receiveIncoming(apdu);
     byte[] scratchPad = apdu.getBuffer();
@@ -3232,6 +3233,9 @@ public class KMKeymasterApplet extends Applet implements AppletEvent, ExtendedLe
     // Clear the Computed SharedHmac and Hmac nonce from persistent memory.
     repository.clearComputedHmac();
     repository.clearHmacNonce();
+
+    //Clear all the operation state.
+    repository.releaseAllOperations();
 
     // Hmac is cleared, so generate a new Hmac nonce.
     seProvider.newRandomNumber(scratchPad, (short) 0, KMRepository.HMAC_SEED_NONCE_SIZE);
@@ -3625,53 +3629,57 @@ public class KMKeymasterApplet extends Applet implements AppletEvent, ExtendedLe
   }
 
   private static void parseEncryptedKeyBlob(byte[] scratchPad) {
-    tmpVariables[0] = KMByteBlob.cast(data[KEY_BLOB]).getStartOff();
-    tmpVariables[1] = KMArray.instance((short) 5);
-    KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_SECRET, KMByteBlob.exp());
-    KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_AUTH_TAG, KMByteBlob.exp());
-    KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_NONCE, KMByteBlob.exp());
-    tmpVariables[2] = KMKeyCharacteristics.exp();
-    KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_KEYCHAR, tmpVariables[2]);
-    KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_PUB_KEY, KMByteBlob.exp());
-    try {
-      data[KEY_BLOB] =
-          decoder.decodeArray(
-              tmpVariables[1],
-              KMByteBlob.cast(data[KEY_BLOB]).getBuffer(),
-              KMByteBlob.cast(data[KEY_BLOB]).getStartOff(),
-              KMByteBlob.cast(data[KEY_BLOB]).length());
-    } catch (ISOException e) {
-      KMException.throwIt(KMError.INVALID_KEY_BLOB);
-    }
-    tmpVariables[0] = KMArray.cast(data[KEY_BLOB]).length();
-    if (tmpVariables[0] < 4) {
-      KMException.throwIt(KMError.INVALID_KEY_BLOB);
-    }
-    data[AUTH_TAG] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_AUTH_TAG);
-
-    // initialize data
-    data[NONCE] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_NONCE);
-    data[SECRET] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_SECRET);
-    data[KEY_CHARACTERISTICS] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_KEYCHAR);
-    data[PUB_KEY] = KMType.INVALID_VALUE;
-    if (tmpVariables[0] == 5) {
-      data[PUB_KEY] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_PUB_KEY);
-    }
-    data[HW_PARAMETERS] =
-        KMKeyCharacteristics.cast(data[KEY_CHARACTERISTICS]).getHardwareEnforced();
-    data[SW_PARAMETERS] =
-        KMKeyCharacteristics.cast(data[KEY_CHARACTERISTICS]).getSoftwareEnforced();
     data[ROT] = repository.readROT();
     if (data[ROT] == KMType.INVALID_VALUE) {
       KMException.throwIt(KMError.UNKNOWN_ERROR);
     }
+    try {
+      tmpVariables[0] = KMByteBlob.cast(data[KEY_BLOB]).getStartOff();
+      tmpVariables[1] = KMArray.instance((short) 5);
+      KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_SECRET,
+              KMByteBlob.exp());
+      KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_AUTH_TAG,
+              KMByteBlob.exp());
+      KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_NONCE,
+              KMByteBlob.exp());
+      tmpVariables[2] = KMKeyCharacteristics.exp();
+      KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_KEYCHAR,
+              tmpVariables[2]);
+      KMArray.cast(tmpVariables[1]).add(KMKeymasterApplet.KEY_BLOB_PUB_KEY,
+              KMByteBlob.exp());
+      data[KEY_BLOB] = decoder.decodeArray(tmpVariables[1],
+              KMByteBlob.cast(data[KEY_BLOB]).getBuffer(),
+              KMByteBlob.cast(data[KEY_BLOB]).getStartOff(),
+              KMByteBlob.cast(data[KEY_BLOB]).length());
+      tmpVariables[0] = KMArray.cast(data[KEY_BLOB]).length();
+      if (tmpVariables[0] < 4) {
+        KMException.throwIt(KMError.INVALID_KEY_BLOB);
+      }
+      data[AUTH_TAG] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_AUTH_TAG);
 
-    data[HIDDEN_PARAMETERS] =
-        KMKeyParameters.makeHidden(data[APP_ID], data[APP_DATA], data[ROT], scratchPad);
-    // make auth data
-    makeAuthData(scratchPad);
-    // Decrypt Secret and verify auth tag
-    decryptSecret(scratchPad);
+      // initialize data
+      data[NONCE] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_NONCE);
+      data[SECRET] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_SECRET);
+      data[KEY_CHARACTERISTICS] = KMArray.cast(data[KEY_BLOB]).get(
+              KEY_BLOB_KEYCHAR);
+      data[PUB_KEY] = KMType.INVALID_VALUE;
+      if (tmpVariables[0] == 5) {
+        data[PUB_KEY] = KMArray.cast(data[KEY_BLOB]).get(KEY_BLOB_PUB_KEY);
+      }
+      data[HW_PARAMETERS] = KMKeyCharacteristics
+              .cast(data[KEY_CHARACTERISTICS]).getHardwareEnforced();
+      data[SW_PARAMETERS] = KMKeyCharacteristics
+              .cast(data[KEY_CHARACTERISTICS]).getSoftwareEnforced();
+
+      data[HIDDEN_PARAMETERS] = KMKeyParameters.makeHidden(data[APP_ID],
+              data[APP_DATA], data[ROT], scratchPad);
+      // make auth data
+      makeAuthData(scratchPad);
+      // Decrypt Secret and verify auth tag
+      decryptSecret(scratchPad);
+    } catch (Exception e) {
+      KMException.throwIt(KMError.INVALID_KEY_BLOB);
+    }
   }
 
   private static void decryptSecret(byte[] scratchPad) {
