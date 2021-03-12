@@ -23,7 +23,7 @@
 #include <cppbor_parse.h>
 #include <CborConverter.h>
 #include <keymaster/keymaster_configuration.h>
-#include <keymaster/attestation_record.h>
+#include <keymaster/km_openssl/attestation_record.h>
 #include <android-base/logging.h>
 #include <Transport.h>
 #include <CommonUtils.h>
@@ -35,6 +35,10 @@
 #define APDU_P1  0x40
 #define APDU_P2  0x00
 #define APDU_RESP_STATUS_OK 0x9000
+#define PROP_BUILD_QEMU              "ro.kernel.qemu"
+#define PROP_BUILD_FINGERPRINT       "ro.build.fingerprint"
+// Cuttlefish build fingerprint substring.
+#define CUTTLEFISH_FINGERPRINT_SS    "aosp_cf_"
 
 namespace keymaster {
 namespace V4_1 {
@@ -183,9 +187,20 @@ static ErrorCode sendProvisionData(std::unique_ptr<se_transport::TransportFactor
 }
 
 ErrorCode Provision::init() {
+    bool isEmulator = false;
 	if(pTransportFactory == nullptr) {
+        // Check if the current build is for emulator or device.
+        isEmulator = android::base::GetBoolProperty(PROP_BUILD_QEMU, false);
+        if (!isEmulator) {
+            std::string fingerprint = android::base::GetProperty(PROP_BUILD_FINGERPRINT, "");
+            if (!fingerprint.empty()) {
+                if (fingerprint.find(CUTTLEFISH_FINGERPRINT_SS, 0)) {
+                    isEmulator = true;
+                }
+            }
+        }
 		pTransportFactory = std::unique_ptr<se_transport::TransportFactory>(new se_transport::TransportFactory(
-					android::base::GetBoolProperty("ro.kernel.qemu", false)));
+					isEmulator));
 		if(!pTransportFactory->openConnection())
             return ErrorCode::UNKNOWN_ERROR;
 	}
