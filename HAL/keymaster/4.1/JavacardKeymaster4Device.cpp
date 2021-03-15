@@ -24,7 +24,7 @@
 #include <keymaster/key_blob_utils/software_keyblobs.h>
 #include <keymaster/android_keymaster_utils.h>
 #include <keymaster/wrapped_key.h>
-#include <keymaster/attestation_record.h>
+#include <keymaster/km_openssl/attestation_record.h>
 #include <keymaster/km_openssl/openssl_err.h>
 #include <keymaster/km_openssl/openssl_utils.h>
 #include <openssl/aes.h>
@@ -42,6 +42,10 @@
 
 #define JAVACARD_KEYMASTER_NAME      "JavacardKeymaster4.1Device v1.0"
 #define JAVACARD_KEYMASTER_AUTHOR    "Android Open Source Project"
+#define PROP_BUILD_QEMU              "ro.kernel.qemu"
+#define PROP_BUILD_FINGERPRINT       "ro.build.fingerprint"
+// Cuttlefish build fingerprint substring.
+#define CUTTLEFISH_FINGERPRINT_SS    "aosp_cf_"
 
 #define APDU_CLS 0x80
 #define APDU_P1  0x40
@@ -125,9 +129,20 @@ enum ExtendedErrors {
 };
 
 static inline std::unique_ptr<se_transport::TransportFactory>& getTransportFactoryInstance() {
+    bool isEmulator = false;
     if(pTransportFactory == nullptr) {
+        // Check if the current build is for emulator or device.
+        isEmulator = android::base::GetBoolProperty(PROP_BUILD_QEMU, false);
+        if (!isEmulator) {
+            std::string fingerprint = android::base::GetProperty(PROP_BUILD_FINGERPRINT, "");
+            if (!fingerprint.empty()) {
+                if (fingerprint.find(CUTTLEFISH_FINGERPRINT_SS, 0)) {
+                    isEmulator = true;
+                }
+            }
+        }
         pTransportFactory = std::unique_ptr<se_transport::TransportFactory>(new se_transport::TransportFactory(
-                    true));
+                    isEmulator));
         pTransportFactory->openConnection();
     }
     return pTransportFactory;
