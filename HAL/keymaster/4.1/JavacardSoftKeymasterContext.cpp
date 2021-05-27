@@ -28,6 +28,8 @@
 #include <JavacardSoftKeymasterContext.h>
 #include <CborConverter.h>
 #include <CommonUtils.h>
+#include <keymaster/km_version.h>
+
 
 using std::unique_ptr;
 using ::keymaster::V4_1::javacard::KmParamSet;
@@ -35,7 +37,7 @@ using ::keymaster::V4_1::javacard::KmParamSet;
 namespace keymaster {
 
 JavaCardSoftKeymasterContext::JavaCardSoftKeymasterContext(keymaster_security_level_t security_level)
-    : PureSoftKeymasterContext(security_level) {}
+    : PureSoftKeymasterContext(KmVersion::KEYMASTER_4_1, security_level) {}
 
 JavaCardSoftKeymasterContext::~JavaCardSoftKeymasterContext() {}
 
