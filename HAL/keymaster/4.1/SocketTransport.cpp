@@ -22,7 +22,7 @@
 #include <errno.h>
 
 #define PORT    8080
-#define IPADDR  "10.9.40.24"
+#define IPADDR  "192.168.0.29"
 //#define IPADDR  "192.168.0.5"
 #define MAX_RECV_BUFFER_SIZE 2500
 
@@ -52,14 +52,15 @@ bool SocketTransport::openConnection() {
         LOG(ERROR) << "Connection failed. Error: " << strerror(errno);
         return false;
 	}
-    socketStatus = true;
+    mSocketStatus = true;
     return true;
 }
 
 bool SocketTransport::sendData(const uint8_t* inData, const size_t inLen, std::vector<uint8_t>& output) {
     uint8_t buffer[MAX_RECV_BUFFER_SIZE];
     int count = 1;
-    while(!socketStatus && count++ < 5 ) {
+    bool sendStatus = false;
+    while(!mSocketStatus && count++ < 5 ) {
         sleep(1);
         LOG(ERROR) << "Trying to open socket connection... count: " << count;
         openConnection();
@@ -74,32 +75,36 @@ bool SocketTransport::sendData(const uint8_t* inData, const size_t inLen, std::v
         static int connectionResetCnt = 0; /* To avoid loop */
         if (ECONNRESET == errno && connectionResetCnt == 0) {
             //Connection reset. Try open socket and then sendData.
-            socketStatus = false;
+            mSocketStatus = false;
             connectionResetCnt++;
-            return sendData(inData, inLen, output);
+            sendStatus =  sendData(inData, inLen, output);
+            closeConnection();
+            return sendStatus; 
         }
         LOG(ERROR) << "Failed to send data over socket err: " << errno;
         connectionResetCnt = 0;
         return false;
     }
-	ssize_t valRead = read( mSocket , buffer, MAX_RECV_BUFFER_SIZE);
+    ssize_t valRead = read( mSocket , buffer, MAX_RECV_BUFFER_SIZE);
     if(0 > valRead) {
         LOG(ERROR) << "Failed to read data from socket.";
     }
     for(size_t i = 0; i < valRead; i++) {
         output.push_back(buffer[i]);
     }
+    closeConnection();
     return true;
 }
 
 bool SocketTransport::closeConnection() {
-    close(mSocket);
-    socketStatus = false;
+    if(mSocketStatus)
+      close(mSocket);
+    mSocketStatus = false;
     return true;
 }
 
 bool SocketTransport::isConnected() {
-    return socketStatus;
+    return mSocketStatus;
 }
 
 }
